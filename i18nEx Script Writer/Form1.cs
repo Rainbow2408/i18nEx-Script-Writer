@@ -18,7 +18,6 @@ namespace i18nEx_Script_Writer
         private static bool button_pressed = false;
         DataTable dataTable = new();
         private static List<SubtitleData> SubtitlesList = new();
-        private static string[] lines = Array.Empty<string>();
         private void SetTreeViewNode(string path, TreeNode node)
         {
             var directories = Directory.GetDirectories(path);
@@ -61,78 +60,22 @@ namespace i18nEx_Script_Writer
                         string write_file = write_path + read_file.Replace(local_path, "");
                         if (File.Exists(write_file))
                         {
-                            DataTable dt_w = new();
-                            List<SubtitleData> SubList_w = new();
-                            dt_w.Columns.Add("Key", typeof(string));
-                            dt_w.Columns.Add("J", typeof(string));
-                            dt_w.Columns.Add("SC", typeof(string));
-                            dt_w.Columns.Add("TC", typeof(string));
-                            dt_w.Columns.Add("E", typeof(string));
-                            lines = File.ReadAllLines(write_file);
-                            foreach (string line in lines)
-                            {
-                                if (line.StartsWith("@VoiceSubtitle"))
-                                {
-                                    var line_read = line.Replace("\u180E", "")["@VoiceSubtitle".Length..];
-                                    SubtitleData? line_json = JsonSerializer.Deserialize<SubtitleData>(line_read);
-                                    if (line_json != null)
-                                    {
-                                        SubList_w.Add(line_json);
-                                        var dt_row = dt_w.Rows.Add(line_json.original);
-                                        MutiLangTextRead(dt_w, dt_row, $"{line_json.translation}<SubID>{SubList_w.Count - 1}");
-                                    }
-                                }
-                                else if (line.Contains('\t'))
-                                {
-                                    var line_split = line.Replace("\u180E", "").Split('\t');
-                                    if (line_split.Length >= 1)
-                                    {
-                                        var Key = line_split[0];
-                                        var dt_row = dt_w.Rows.Add(Key);
-                                        MutiLangTextRead(dt_w, dt_row, line_split[1]);
-                                    }
-                                }
-                            }
-                            DataTable dt_r = new();
-                            List<SubtitleData> SubList_r = new();
-                            dt_r.Columns.Add("Key", typeof(string));
-                            dt_r.Columns.Add("J", typeof(string));
-                            lines = File.ReadAllLines(read_file);
-                            foreach (string line in lines)
-                            {
-                                if (line.StartsWith("@VoiceSubtitle"))
-                                {
-                                    var line_read = line.Replace("\u180E", "")["@VoiceSubtitle".Length..];
-                                    SubtitleData? line_json = JsonSerializer.Deserialize<SubtitleData>(line_read);
-                                    if (line_json != null)
-                                    {
-                                        SubList_r.Add(line_json);
-                                        var dt_row = dt_r.Rows.Add(line_json.original);
-                                        if(!line_json.translation.Contains('<')) line_json.translation = $"<{comboBox1.Text}>{line_json.translation}";
-                                        MutiLangTextRead(dt_r, dt_row, $"{line_json.translation}<SubID>{SubList_r.Count - 1}");
-                                    }
-                                }
-                                else if (line.Contains('\t'))
-                                {
-                                    var line_split = line.Replace("\u180E", "").Split('\t');
-                                    if (line_split.Length >= 1)
-                                    {
-                                        var Key = line_split[0];
-                                        var dt_row = dt_r.Rows.Add(Key);
-                                        string tl = line_split[1];
-                                        if (!tl.Contains('<')) tl = $"<{comboBox1.Text}>{tl}";
-                                        MutiLangTextRead(dt_r, dt_row, tl);
-                                    }
-                                }
-                            }
-                            if (dt_w.Rows.Count > dt_r.Rows.Count) continue; //To Do: When missing row, make a manually edit list.
+                            DataTable dt_w = new() ,dt_r = new();
+                            List<SubtitleData> SubList_w = new(), SubList_r = new();
+                            DataImport.ToDataTable(write_file, ref dt_w, ref SubList_w);
+                            DataImport.ToDataTable(read_file, ref dt_r, ref SubList_r, comboBox1.Text);
                             DataColumn[] keyColumns = new DataColumn[1];
                             keyColumns[0] = dt_w.Columns["Key"];
                             dt_w.PrimaryKey = keyColumns;
+                            bool Manually_edit = false;
                             foreach (DataRow dr_r in dt_r.Rows)
                             {
                                 DataRow dr_w_find = dt_w.Rows.Find(dr_r[dt_r.Columns["Key"]]);
-                                if (dr_w_find == null) continue; //To Do: When missing row, make a manually edit list.
+                                if (dr_w_find == null)
+                                {
+                                    Manually_edit = true;
+                                    continue;
+                                }
                                 foreach (DataColumn dc_r in dt_r.Columns)
                                 {
                                     string key = dc_r.ColumnName;
@@ -141,7 +84,8 @@ namespace i18nEx_Script_Writer
                                         dt_w.Rows[dt_w.Rows.IndexOf(dr_w_find)][dt_w.Columns[key]] = dr_r[dt_r.Columns[key]];
                                 }
                             }
-                            saveScript(write_file + "_.txt", dt_w, SubList_w);
+                            if (Manually_edit) { } //To Do: When missing row, call manually edit Form.
+                            button_pressed = DataImport.SaveScript(write_file + "_.txt", dt_w, SubList_w);
                         }
                     }
                 }
@@ -199,33 +143,6 @@ namespace i18nEx_Script_Writer
             }
             return string.Empty;
         }
-        private void MutiLangTextRead(DataTable dt, DataRow row, string Value, int col_width = 160, DataGridView? dgv = null)
-        {
-            var Value_split = Value.Split('<');
-
-            foreach (var val in Value_split)
-            {
-                int sep = val.IndexOf('>');
-                if (sep != -1)
-                {
-                    var tl_key = val[..sep];
-                    var tl_value = val[(sep + 1)..];
-                    if (!dt.Columns.Contains(tl_key))
-                    {
-                        dt.Columns.Add(tl_key, typeof(string));
-                        if (dgv != null)
-                            dgv.Columns[tl_key].Width = col_width;
-                    }
-                    if (dt.Columns[tl_key] != null)
-                        row[dt.Columns[tl_key].Ordinal] = tl_value;
-                }
-                else
-                {
-                    if (dt.Columns["J"] != null)
-                        row[dt.Columns["J"].Ordinal] = val;
-                }
-            }
-        }
         private void treeView1_NodeMouseDoubleClick(object sender, TreeNodeMouseClickEventArgs e)
         {
             try
@@ -247,45 +164,11 @@ namespace i18nEx_Script_Writer
                     InitialDataGrid();
                     script_path = script_root + e.Node.FullPath.Substring(e.Node.FullPath.IndexOf("\\"));
                     label1.Text = "[Message] Open file at: " + script_path;
-                    lines = File.ReadAllLines(script_path);
-                    foreach (string line in lines)
-                    {
-                        if (line.StartsWith("@VoiceSubtitle"))
-                        {
-                            var line_read = line.Replace("\u180E", "")["@VoiceSubtitle".Length..];
-                            SubtitleData? line_json = JsonSerializer.Deserialize<SubtitleData>(line_read);
-                            if (line_json != null)
-                            {
-                                SubtitlesList.Add(line_json);
-                                var dt_row = dataTable.Rows.Add(line_json.original);
-                                MutiLangTextRead(dataTable ,dt_row, $"{line_json.translation}<SubID>{SubtitlesList.Count - 1}", col_width: 48);
-                            }
-                        }
-                        else if (line.Contains('\t'))
-                        {
-                            var line_split = line.Replace("\u180E", "").Split('\t');
-                            if (line_split.Length >= 1)
-                            {
-                                var Key = line_split[0];
-                                var dt_row = dataTable.Rows.Add(Key);
-                                MutiLangTextRead(dataTable, dt_row, line_split[1]);
-                            }
-                        }
-                    }
+                    button5.Enabled = DataImport.ToDataTable(script_path, ref dataTable, ref SubtitlesList, "J", dataGridView1);
                     if (dataGridView1.Columns["SubID"] != null)
+                    {
                         dataGridView1.Columns["SubID"].ReadOnly = true;
-                    foreach (DataGridViewRow row in dataGridView1.Rows)
-                    {
-                        row.DefaultCellStyle.WrapMode = DataGridViewTriState.False;
-                        row.Height = 25;
-                    }
-                    if (dataTable.Columns.Count < ((dataTable.Columns["SubID"] == null) ? 5 : 6))
-                    {
-                        if (dataGridView1.Columns["Key"] != null)
-                            dataGridView1.Columns["Key"].Width = 360;
-                        if (dataGridView1.Columns["J"] != null)
-                            dataGridView1.Columns["J"].Width = 360;
-                        button5.Enabled = true;
+                        dataGridView1.Columns["SubID"].Width = 48;
                     }
                     if (checkBox1.Checked && button5.Enabled) button5.PerformClick();
                 }
@@ -352,50 +235,14 @@ namespace i18nEx_Script_Writer
             dataGridView1.AutoResizeRow(e.RowIndex, DataGridViewAutoSizeRowMode.AllCells);
             if(dataGridView1.Rows[e.RowIndex].Height < 25) dataGridView1.Rows[e.RowIndex].Height = 25;
         }
+        private void dataGridView1_CellValueChanged(object sender, DataGridViewCellEventArgs e)
+        {
+            script_modified = true;
+        }
 
         private void button3_Click(object sender, EventArgs e)
         {
-            saveScript(script_path + "_.txt", dataTable, SubtitlesList);
-        }
-        private void saveScript(string file_path, DataTable dt, List<SubtitleData> SubData)
-        {
-            try
-            {
-                if (file_path != String.Empty)
-                {
-                    var lineList = new HashSet<string>();
-                    foreach (DataRow dr in dt.Rows)
-                    {
-                        int idx = -1;
-                        bool Sub = false;
-                        string org = string.Empty;
-                        string tl = string.Empty;
-                        foreach (DataColumn dt_col in dt.Columns)
-                        {
-                            string dt_key = dt_col.ColumnName;
-                            if (dt_key == "Key") org = dr[dt_key].ToString();
-                            else if (dt_key == "J") tl = dr[dt_key].ToString() + tl;
-                            else if (dt_key == "SubID") Sub = int.TryParse(dr["SubID"].ToString(), out idx);
-                            else tl += $"<{dt_key}>{dr[dt_key]}";
-                        }
-                        if (Sub)
-                        {
-                            SubData[idx].translation = tl;
-                            JsonSerializerOptions jso = new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
-                            lineList.Add("@VoiceSubtitle" + JsonSerializer.Serialize(SubData[idx], jso));
-                        }
-                        else lineList.Add($"{org}\t{tl}");
-                    }
-                    if (lineList.Count != 0)
-                        File.WriteAllLines(file_path, lineList.ToArray(), Encoding.UTF8);
-                }
-                button_pressed = true;
-            }
-            // If the file is not found, handle the exception and inform the user.
-            catch (System.ComponentModel.Win32Exception)
-            {
-                MessageBox.Show("Can't write the File.");
-            }
+            button_pressed = DataImport.SaveScript(script_path + "_.txt", dataTable, SubtitlesList);
         }
         private void button4_Click(object sender, EventArgs e)
         {
@@ -407,12 +254,6 @@ namespace i18nEx_Script_Writer
                 treeView1.Nodes[i].Expand();
             treeView1.Enabled = true;
         }
-
-        private void dataGridView1_CellValueChanged(object sender, DataGridViewCellEventArgs e)
-        {
-            script_modified = true;
-        }
-
         private void button5_Click(object sender, EventArgs e)
         {
             if (dataTable.Columns["Key"] == null)
@@ -457,15 +298,5 @@ namespace i18nEx_Script_Writer
                 else MessageBox.Show("Please select diffrent script source!", "ERROR");
             }
         }
-    }
-    public class SubtitleData
-    {
-        public int addDisplayTime { get; set; }
-        public int displayTime { get; set; }
-        public bool isCasino { get; set; }
-        public string? original { get; set; }
-        public int startTime { get; set; }
-        public string? translation { get; set; }
-        public string? voice { get; set; }
     }
 }
